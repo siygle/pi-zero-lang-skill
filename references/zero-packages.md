@@ -1,5 +1,5 @@
 ---
-name: zero-packages
+name: packages
 description: Create, inspect, and repair Zero packages and manifests.
 ---
 
@@ -54,8 +54,8 @@ use std.parse
 Avoid implicit files. If an import is unknown, run:
 
 ```sh
-zero check --json <package>
-zero graph --json <package>
+zero check <package>
+zero graph <package>
 ```
 
 ## Dependencies
@@ -75,12 +75,24 @@ The resolver is declarative; it records deterministic lock facts under `.zero/pa
 ## Inspect
 
 ```sh
-zero graph --json <package>
-zero doc --json <package>
-zero dev --json --trace <package>
+zero graph <package>
+zero doc <package>
+zero dev <package>
 ```
 
-Useful `graph` facts include modules, source paths, import edges, public and private symbol counts, function effects, required capabilities, target facts, dependency facts, and package cache key inputs.
+Use `--json` when a tool needs exact graph, doc, or dev fields. Useful `graph` facts include modules, source paths, import edges, public and private symbol counts, function effects, required capabilities, target facts, dependency facts, and package cache key inputs.
+
+## Graph Authoring
+
+For agent edits, inspect the package through the graph. Create an artifact under `.zero/` only when another tool needs a file handoff:
+
+```sh
+zero graph view <package>
+zero graph check <package>
+zero graph import --out .zero/agent/package.program-graph <package>
+```
+
+Source-backed graph patches rewrite canonical `.0` files directly after validation. Keep derived graph artifacts out of the package source unless the user explicitly asks for them.
 
 ## Common Repairs
 

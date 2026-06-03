@@ -1,17 +1,23 @@
 ---
-name: zero-diagnostics
+name: diagnostics
 description: Read Zero diagnostics, explanations, and typed fix plans.
 ---
 
 # Zero Diagnostics
 
-Use this when Zero code fails to parse, typecheck, build, test, or target-check. Zero diagnostics are intended for agents: consume JSON first, then prose.
+Use this when Zero code fails to parse, typecheck, build, test, or target-check. Zero diagnostics are intended for agents: start with the readable command output, then use JSON when you need stable fields, spans, or repair metadata.
 
 ## Commands
 
 ```sh
-zero check --json <input>
+zero check <input>
 zero explain <diagnostic-code>
+```
+
+Use machine-readable output when you need exact fields:
+
+```sh
+zero check --json <input>
 zero explain --json <diagnostic-code>
 zero fix --plan --json <input>
 ```
@@ -31,7 +37,7 @@ Important fields from `zero check --json`:
 - `repair`: optional repair id and summary
 - `related`: extra spans or facts
 
-Do not scrape terminal prose when JSON is available.
+Do not scrape terminal prose for automation. Use JSON when a script or tool needs stable fields.
 
 ## Fix Safety
 
@@ -57,11 +63,14 @@ Apply only the edit you can justify from the source and fix plan. Treat `require
 - `TAR001`: unknown target; inspect `zero targets`.
 - `TAR002`: capability unavailable for selected target.
 - `BLD003`: removed backend flag; use direct emitters.
+- `STD002`: unknown standard-library helper; use a documented `std.<module>.<helper>` name.
+- `STD003`: standard-library capability or contract mismatch; inspect the helper signature and required capability.
+- `TYP009`: immutable value used where a mutable destination is required; make the binding `var` or pass mutable storage.
 
 ## Agent Triage
 
-1. Run the failing command with `--json` when supported.
-2. Use the span to inspect only the relevant source first.
+1. Run the failing command normally first.
+2. If the readable output is not enough, rerun with `--json` and use the span to inspect only the relevant source.
 3. Run `zero explain <code>` before broad refactors.
 4. If multiple diagnostics share a root cause, fix the earliest source issue.
 5. Re-run the same command after the patch.
