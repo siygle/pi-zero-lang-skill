@@ -79,7 +79,7 @@ Load these reference files on demand, relative to this skill directory:
 
 ## HTTP / libcurl Notes
 
-Zero 0.2.x supports hosted HTTP via `std.http` on `linux-x64`, linked through libcurl. On this machine, system libcurl headers may be missing, but Homebrew curl is installed. When building HTTP programs, set:
+Zero 0.3.x supports hosted HTTP via `std.http` on `linux-x64`, linked through libcurl. On this machine, system libcurl headers may be missing, but Homebrew curl is installed. When building HTTP programs, set:
 
 ```bash
 export CPATH="$(brew --prefix curl)/include:${CPATH:-}"
