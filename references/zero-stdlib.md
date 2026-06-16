@@ -33,16 +33,19 @@ Call functions with their module path, such as `std.mem.len(value)`.
 - `std.ascii`: ASCII byte predicates, case conversion, and digit value helpers.
 - `std.fmt`: caller-buffer formatting for booleans and integer text.
 - `std.text`: ASCII and UTF-8 byte-backed text validation.
+- `std.unicode`: strict UTF-8 codepoint decode/encode iteration and codepoint-class helpers; pair with `std.text.utf8Valid`/`std.text.utf8Len` for whole-span validation and counting.
 - `std.math`: fixed-width min/max/clamp, checked and saturating integer arithmetic, GCD/LCM, powers, modular power, roots, combinatorics, primality, and divisor routines.
 - `std.path`: target-neutral lexical path basename, dirname, extension, join, normalize, and relative helpers.
 - `std.codec`: byte reads, endian reads/writes, varint sizing/encode/decode, base64/hex encode/decode, CRC helpers, and byte checksums.
 - `std.parse`: byte scanners and integer/bool parsers returning `Maybe<T>`.
-- `std.time`: duration construction, conversion, comparison, clamp, and target-gated clock helpers.
-- `std.rand`: explicit deterministic random sources, random bits, and target entropy helpers.
-- `std.crypto`: small hash and byte-oriented crypto helpers.
+- `std.regex`: compile-once regular expression matching for a documented ECMA-262-leaning subset (literals, classes, anchors, word boundaries, greedy quantifiers, alternation, groups); unsupported constructs fail with structured status codes.
+- `std.inet`: target-neutral IPv4/IPv6/hostname literal validation and parsing; no network capability needed.
+- `std.time`: duration construction, conversion, comparison, elapsed-window helpers, RFC 3339 date/time validation and epoch parsing, and target-gated clock helpers.
+- `std.rand`: explicit deterministic random sources, random bits, target entropy helpers, and caller-buffer entropy IDs.
+- `std.crypto`: small hash, fixed-width hash text, byte-oriented crypto helpers, and caller-buffer IDs.
 - `std.json`: explicit-buffer JSON validation, structured status codes, shallow field lookup, typed scalar decode, parsing, and string/object writing helpers.
 - `std.toml`: no-allocation TOML validation, shallow/dotted field lookup, and typed scalar decode helpers.
-- `std.url`: target-neutral URL splitting, percent/query encoding and decoding, query lookup, and query append helpers.
+- `std.url`: target-neutral URL splitting, percent/query/form encoding and decoding, query/form lookup, and query append helpers.
 - `std.str`: byte-span string helpers, including non-overlapping reverse, prefix/suffix, substring, trim, and word counts.
 - `std.io`: buffered reader/writer surfaces, cursor writes, line scanning, and byte copy over caller-owned storage.
 - `std.testing`: Bool-returning helpers for test blocks and byte-output checks.
@@ -56,11 +59,11 @@ These modules depend on host or runtime capabilities:
 
 - `std.args`: process arguments
 - `std.cli`: command-line flag and option helpers over process arguments
-- `std.env`: process environment
-- `std.fs`: hosted filesystem and explicit `Fs` or `owned<File>` handles
+- `std.env`: process environment lookup, comparisons, and typed fallback parsing
+- `std.fs`: hosted filesystem, explicit `Fs` or `owned<File>` handles, and file-level byte helpers
 - `std.net`: bootstrap network handles
 - `std.http`: HTTP request/response helpers and loopback listeners
-- `std.proc`: process execution helpers
+- `std.proc`: process execution and exit-status helpers
 - `World.out` and `World.err`: program output capabilities
 
 Non-host targets may reject these APIs with target diagnostics. Inspect target facts before cross-building:
@@ -237,6 +240,8 @@ pub fn main(world: World) -> Void raises {
 
 This catalog is generated from the compiler's standard-library signature table. Use these names exactly; helpers with `T` are generic over the concrete span or item type inferred from the call.
 
+Fetch one module's section instead of this whole catalog with `zero skills get stdlib --topic <prefix>`, for example `zero skills get stdlib --topic std.time`.
+
 ### std.args
 
 ```text
@@ -269,6 +274,11 @@ toUpper(arg0: u8) -> u8
 
 ```text
 argEquals(arg0: usize, arg1: String) -> Bool
+command() -> Maybe<String>
+commandOr(arg0: String) -> String
+commandEquals(arg0: String) -> Bool
+argOr(arg0: usize, arg1: String) -> String
+argU32Or(arg0: usize, arg1: u32) -> u32
 hasFlag(arg0: String) -> Bool
 optionValue(arg0: String) -> Maybe<String>
 optionValueOr(arg0: String, arg1: String) -> String
@@ -328,6 +338,11 @@ hash32(arg0: Span<u8>) -> u32
 hmac32(arg0: Span<u8>, arg1: Span<u8>) -> u32
 constantTimeEql(arg0: Span<u8>, arg1: Span<u8>) -> Bool
 secureRandomU32() -> u32
+fixedHex32(arg0: MutSpan<u8>, arg1: u32) -> Maybe<Span<u8>>
+hashHex32(arg0: MutSpan<u8>, arg1: Span<u8>) -> Maybe<Span<u8>>
+hmacHex32(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8>>
+stableId32(arg0: MutSpan<u8>, arg1: Span<u8>) -> Maybe<Span<u8>>
+randomId32(arg0: MutSpan<u8>) -> Maybe<Span<u8>>
 ```
 
 ### std.env
@@ -336,8 +351,11 @@ secureRandomU32() -> u32
 get(arg0: String) -> Maybe<String>
 has(arg0: String) -> Bool
 getOr(arg0: String, arg1: String) -> String
+equals(arg0: String, arg1: String) -> Bool
 parseBool(arg0: String) -> Maybe<Bool>
+parseBoolOr(arg0: String, arg1: Bool) -> Bool
 parseU32(arg0: String) -> Maybe<u32>
+parseU32Or(arg0: String, arg1: u32) -> u32
 ```
 
 ### std.fmt
@@ -368,6 +386,7 @@ readAll(allocator: Alloc, fs: Fs, path: String, max: usize) -> Maybe<owned<ByteB
 readAllOrRaise(allocator: Alloc, fs: Fs, path: String, max: usize) -> owned<ByteBuf> raises [NotFound, TooLarge, Io]
 exists(arg0: String) -> Bool
 readBytes(arg0: String, arg1: MutSpan<u8>) -> Maybe<usize>
+readBytesAt(arg0: String, arg1: usize, arg2: MutSpan<u8>) -> Maybe<usize>
 writeBytes(arg0: String, arg1: Span<u8>) -> Maybe<usize>
 isDir(arg0: String) -> Bool
 makeDir(arg0: String) -> Bool
@@ -381,8 +400,18 @@ fileLen(arg0: mutref<File>) -> Maybe<usize>
 close(arg0: mutref<File>) -> Void
 readFile(arg0: Fs, arg1: String, arg2: MutSpan<u8>) -> Maybe<usize>
 writeFile(arg0: Fs, arg1: String, arg2: Span<u8>) -> Bool
+readFileBytes(arg0: Fs, arg1: String, arg2: MutSpan<u8>) -> Maybe<Span<u8>>
+readFileEquals(arg0: Fs, arg1: String, arg2: MutSpan<u8>, arg3: Span<u8>) -> Bool
 copyFile(arg0: String, arg1: String, arg2: MutSpan<u8>) -> Bool
 ```
+
+`readBytes` and `readFile` fill the caller buffer and return the TOTAL file size
+(snprintf convention): a value above `len(buffer)` means the buffer holds only the
+first `len(buffer)` bytes, so compare the result against the buffer length instead
+of assuming the whole file arrived. `readFileBytes` returns `null` when the file
+exceeds the buffer. Process files larger than your buffer with `readBytesAt`:
+loop `offset += len(buffer)` until `offset` reaches the returned total, taking
+`min(len(buffer), total - offset)` valid bytes per chunk.
 
 ### std.http
 
@@ -425,8 +454,18 @@ writeRequest(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8
 writeJsonRequest(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8>>
 writeResponse(arg0: MutSpan<u8>, arg1: u16, arg2: Span<u8>) -> Maybe<Span<u8>>
 writeJsonResponse(arg0: MutSpan<u8>, arg1: u16, arg2: Span<u8>) -> Maybe<Span<u8>>
+writeJsonError(arg0: MutSpan<u8>, arg1: u16, arg2: Span<u8>) -> Maybe<Span<u8>>
 writeCorsPreflight(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>, arg3: Span<u8>) -> Maybe<Span<u8>>
 writeCorsJsonResponse(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>, arg3: Span<u8>) -> Maybe<Span<u8>>
+writeTextResponse(arg0: MutSpan<u8>, arg1: u16, arg2: Span<u8>) -> Maybe<Span<u8>>
+writeTextOk(arg0: MutSpan<u8>, arg1: Span<u8>) -> Maybe<Span<u8>>
+writeHtmlResponse(arg0: MutSpan<u8>, arg1: u16, arg2: Span<u8>) -> Maybe<Span<u8>>
+writeHtmlOk(arg0: MutSpan<u8>, arg1: Span<u8>) -> Maybe<Span<u8>>
+writeRedirect(arg0: MutSpan<u8>, arg1: u16, arg2: Span<u8>) -> Maybe<Span<u8>>
+writeFound(arg0: MutSpan<u8>, arg1: Span<u8>) -> Maybe<Span<u8>>
+writeSeeOther(arg0: MutSpan<u8>, arg1: Span<u8>) -> Maybe<Span<u8>>
+writeMovedPermanently(arg0: MutSpan<u8>, arg1: Span<u8>) -> Maybe<Span<u8>>
+writePermanentRedirect(arg0: MutSpan<u8>, arg1: Span<u8>) -> Maybe<Span<u8>>
 writeJsonOk(arg0: MutSpan<u8>, arg1: Span<u8>) -> Maybe<Span<u8>>
 writeJsonCreated(arg0: MutSpan<u8>, arg1: Span<u8>) -> Maybe<Span<u8>>
 writeJsonBadRequest(arg0: MutSpan<u8>, arg1: Span<u8>) -> Maybe<Span<u8>>
@@ -488,6 +527,24 @@ nextLineStart(arg0: Span<u8>, arg1: usize) -> usize
 countLines(arg0: Span<u8>) -> usize
 ```
 
+### std.inet
+
+```text
+isIpv4(text: Span<u8>) -> Bool
+parseIpv4(text: Span<u8>) -> Maybe<u32>
+isIpv6(text: Span<u8>) -> Bool
+parseIpv6(buffer: MutSpan<u8>, text: Span<u8>) -> Maybe<Span<u8>>
+isHostname(text: Span<u8>) -> Bool
+```
+
+Internet address literal helpers, kept separate from `std.net` so they stay
+usable on targets without the Net capability. `isIpv4`/`parseIpv4` accept
+strict dotted quads (four 0-255 octets, no leading zeros; the parse packs
+big-endian). `isIpv6`/`parseIpv6` accept RFC 4291 forms including `::`
+compression and embedded IPv4, writing 16 network-order bytes into the caller
+buffer. `isHostname` enforces RFC 1123: dot-separated labels of 1-63
+alphanumeric/hyphen bytes, no leading/trailing hyphens, 253 bytes total.
+
 ### std.json
 
 ```text
@@ -512,6 +569,17 @@ writeStringBytes(arg0: MutSpan<u8>, arg1: Span<u8>) -> Maybe<Span<u8>>
 writeObject1String(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8>>
 writeObject1U32(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: u32) -> Maybe<Span<u8>>
 writeObject1Bool(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Bool) -> Maybe<Span<u8>>
+writeFieldRaw(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8>>
+writeFieldString(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8>>
+writeFieldU32(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: u32) -> Maybe<Span<u8>>
+writeFieldBool(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Bool) -> Maybe<Span<u8>>
+writeObject2Fields(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8>>
+writeObject2StringField(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>, arg3: Span<u8>) -> Maybe<Span<u8>>
+writeObject2U32Field(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: u32, arg3: Span<u8>) -> Maybe<Span<u8>>
+writeObject2BoolField(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Bool, arg3: Span<u8>) -> Maybe<Span<u8>>
+writeArray2Strings(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8>>
+writeArray2U32(arg0: MutSpan<u8>, arg1: u32, arg2: u32) -> Maybe<Span<u8>>
+writeArray2Bools(arg0: MutSpan<u8>, arg1: Bool, arg2: Bool) -> Maybe<Span<u8>>
 ```
 
 ### std.toml
@@ -671,6 +739,8 @@ spawn(arg0: String) -> ProcStatus
 exitCode(arg0: ProcStatus) -> i32
 succeeded(arg0: ProcStatus) -> Bool
 failed(arg0: ProcStatus) -> Bool
+runOk(arg0: String) -> Bool
+runCode(arg0: String) -> i32
 ```
 
 ### std.rand
@@ -681,7 +751,29 @@ nextU32(arg0: mutref<RandSource>) -> u32
 nextBool(arg0: mutref<RandSource>) -> Bool
 entropyU32() -> u32
 entropySeed() -> RandSource
+entropyHex32(arg0: MutSpan<u8>) -> Maybe<Span<u8>>
 ```
+
+### std.regex
+
+```text
+compile(buffer: MutSpan<u8>, pattern: Span<u8>) -> Maybe<Span<u8>>
+compileStatus(buffer: MutSpan<u8>, pattern: Span<u8>) -> u32
+statusName(status: u32) -> String
+isMatch(program: Span<u8>, text: Span<u8>) -> Bool
+matches(pattern: Span<u8>, text: Span<u8>) -> Maybe<Bool>
+```
+
+Supported pattern subset (ECMA-262-leaning, matching by codepoint, unanchored
+search like `RegExp.prototype.test`): literals, `.`, classes with negation,
+ranges, and `\d \D \w \W \s \S`, anchors `^` `$`, word boundaries `\b` `\B`,
+greedy quantifiers `* + ? {m} {m,} {m,n}`, alternation `|`, capturing and
+`(?:...)` groups (matching only). Compile once into a caller buffer, then call
+`isMatch` repeatedly. Unsupported constructs are compile errors with status
+codes: 1 backreference, 2 lookahead, 3 lookbehind, 4 named group, 5 lazy
+quantifier, 6 group modifier, 7 unicode property escape, 8 syntax, 9 quantifier
+range, 10 over buffer/2048-byte program limit, 11 pattern not UTF-8, 12 nesting
+depth over 32. `statusName` names a code for diagnostics.
 
 ### std.search
 
@@ -776,7 +868,42 @@ max(arg0: Duration, arg1: Duration) -> Duration
 clamp(arg0: Duration, arg1: Duration, arg2: Duration) -> Duration
 lessThan(arg0: Duration, arg1: Duration) -> Bool
 isZero(arg0: Duration) -> Bool
+abs(arg0: Duration) -> Duration
+between(arg0: Duration, arg1: Duration) -> Duration
+hasElapsed(arg0: Duration, arg1: Duration, arg2: Duration) -> Bool
+isRfc3339Date(text: Span<u8>) -> Bool
+isRfc3339Time(text: Span<u8>) -> Bool
+isRfc3339DateTime(text: Span<u8>) -> Bool
+parseRfc3339DateTimeOr(text: Span<u8>, fallback: i64) -> i64
+isLeapYear(year: u32) -> Bool
+daysInMonth(year: u32, month: u32) -> u32
 ```
+
+The RFC 3339 helpers are target-neutral and validate calendar dates (leap
+years, days-in-month), times with fractional seconds and numeric offsets, and
+date-times joined by `T` or `t`. The leap-second rule is exact: seconds `60`
+is valid only when the time normalized by its offset equals `23:59:60` UTC,
+wrapping modulo 24 hours (`00:29:60+00:30` is valid; `23:59:60-01:00` is not).
+`parseRfc3339DateTimeOr` returns UTC epoch seconds, truncating fractions and
+mapping a valid leap second to the same epoch second as `:59`; it returns the
+fallback for invalid text.
+
+### std.unicode
+
+```text
+decodeAt(text: Span<u8>, index: usize) -> Maybe<u32>
+widthAt(text: Span<u8>, index: usize) -> Maybe<usize>
+encode(buffer: MutSpan<u8>, cp: u32) -> Maybe<Span<u8>>
+encodedWidth(cp: u32) -> Maybe<usize>
+isDigit(cp: u32) -> Bool
+isWord(cp: u32) -> Bool
+isSpace(cp: u32) -> Bool
+```
+
+Decoding is strict UTF-8 (overlong encodings, surrogates, values above
+U+10FFFF, and truncated sequences return `null`). Iterate codepoints by
+advancing a byte index with `widthAt`. The class helpers use ECMA-262 regex
+semantics by codepoint (`\d` `\w` `\s`).
 
 ### std.url
 
@@ -791,7 +918,11 @@ host(arg0: Span<u8>) -> Maybe<Span<u8>>
 path(arg0: Span<u8>) -> Span<u8>
 query(arg0: Span<u8>) -> Maybe<Span<u8>>
 queryValue(arg0: Span<u8>, arg1: Span<u8>) -> Maybe<Span<u8>>
+queryValueDecoded(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8>>
 writeQueryParam(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8>>
+writeFormField(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8>>
+appendFormField(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8>>
+formValue(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8>>
 appendQuery(arg0: MutSpan<u8>, arg1: Span<u8>, arg2: Span<u8>) -> Maybe<Span<u8>>
 ```
 
@@ -806,15 +937,17 @@ pub fn main(world: World) -> Void raises {
 }
 ```
 
-Use the CLI helpers for exact flag and option conventions before writing a
-custom argument loop:
+Use the CLI helpers for command, fallback, exact flag, and option conventions
+before writing a custom argument loop:
 
 ```zero
 pub fn main(world: World) -> Void raises {
-    let name: String = std.cli.optionValueOr("--name", "zero")
-    let count: Maybe<u32> = std.cli.optionU32("--count")
-    if std.cli.hasFlag("--json") && count.has {
+    let command: String = std.cli.commandOr("help")
+    let name: String = std.cli.argOr(2, "world")
+    if std.mem.eql(command, "hello") {
+        check world.out.write("hello ")
         check world.out.write(name)
+        check world.out.write("\n")
     }
 }
 ```
@@ -848,7 +981,11 @@ For API-style handlers, parse the request envelope with route helpers such as
 `std.http.requestHasJsonContentType`, and `std.http.requestJsonBodyWithin`.
 Use path segment helpers for resource routes such as `/users/7`; they borrow
 zero-based, non-empty segments and ignore leading, trailing, or repeated `/`.
-Prefer the status-specific JSON writers for common responses:
+Prefer the status-specific JSON writers for common success responses and
+`std.http.writeJsonError(response, status, code)` for conventional
+`{"error":"code"}` failures. `writeJsonError` validates the code before writing
+JSON, so agents do not need to hand-build simple error bodies. The full custom
+body writers remain available:
 `std.http.writeJsonOk`, `std.http.writeJsonCreated`,
 `std.http.writeJsonBadRequest`, `std.http.writeJsonUnauthorized`,
 `std.http.writeJsonForbidden`, `std.http.writeJsonNotFound`,
@@ -859,8 +996,17 @@ Prefer the status-specific JSON writers for common responses:
 and `std.http.writeCorsJsonResponse` when a JSON response also needs
 `access-control-allow-origin`. `writeCorsJsonResponse` takes a status-line
 fragment such as `"200 OK"` or `"422 Unprocessable Entity"`. Use
+`std.http.writeTextOk` or `std.http.writeHtmlOk` for simple non-JSON responses
+such as health text, `robots.txt`, or a small HTML page. Use redirect helpers
+such as `std.http.writeFound`, `std.http.writeSeeOther`,
+`std.http.writeMovedPermanently`, or `std.http.writePermanentRedirect` instead
+of hand-writing `Location` headers; they reject empty or control-character
+location values before writing. Use
 `std.http.responseBodyBytes` to read the body from a response envelope produced
-locally by `writeResponse` or a JSON writer.
+locally by `writeResponse`, a JSON writer, a redirect writer, or a text/html
+writer. When smoke-testing a JSON API, hit success plus missing/invalid input,
+unknown-route, and wrong-method paths. Check HTTP status codes and JSON bodies,
+not just happy-path response text.
 
 For a runnable local API server, define a same-module handler and call
 `std.http.listen(world)` from `main`. The handler signature is
@@ -882,7 +1028,7 @@ fn handle(request: Span<u8>, response: MutSpan<u8>) -> Maybe<Span<u8>> {
     if std.http.requestIsGet(request, "/ping") {
         return std.http.writeJsonOk(response, "{\"message\":\"pong\"}")
     }
-    return std.http.writeJsonNotFound(response, "{\"error\":\"not_found\"}")
+    return std.http.writeJsonError(response, 404, "not_found")
 }
 ```
 
@@ -937,7 +1083,8 @@ Hosted file APIs can use explicit handles:
 ```zero
 pub fn main(world: World) -> Void raises {
     let fs: Fs = std.fs.host()
-    if std.fs.writeFile(fs, ".zero/out/log.txt", "hello\n") {
+    var read_buf: [32]u8 = [0_u8; 32]
+    if std.fs.writeFile(fs, ".zero/out/log.txt", "hello\n") && std.fs.readFileEquals(fs, ".zero/out/log.txt", read_buf, "hello\n") {
         check world.out.write("wrote\n")
     }
 }

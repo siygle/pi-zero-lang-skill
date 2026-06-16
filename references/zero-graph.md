@@ -5,109 +5,47 @@ description: Use ProgramGraph commands as the primary agent authoring and inspec
 
 # Zero Graph Authoring
 
-Use this when an agent needs to create, inspect, patch, validate, import, or
-export Zero programs through the graph interface. The graph interface is the primary agent authoring surface. `zero.graph` is the repository graph store for
-packages, `.0` files are the human-readable source projection, and
-`.program-graph` files are derived debug/interchange artifacts.
+Use this when creating, inspecting, patching, importing, or exporting Zero programs through the graph interface, the primary agent authoring surface. `zero.graph` is the repository graph store for packages, `.0` files are the human-readable source projection, and `.program-graph` files are derived debug/interchange artifacts.
 
 ## Source Boundary
 
-- For packages, patch the package or active manifest (`zero.toml`
-  takes precedence over `zero.json`); the patch writes
-  `zero.graph` after validation. Normal `zero check`, `zero run`, `zero test`,
-  `zero build`, `zero size`, and `zero mem` commands compile from
-  `zero.graph`.
-- Use `zero export [package]` only when the user asks to materialize or refresh
-  `.0` projections for human review.
-- Use `zero import [package]` after a human edits `.0` so the
-  reviewed source projection refreshes `zero.graph`.
-- Use `zero verify-projection [package]` when projection drift must fail
-  without writing files.
-- Use `.program-graph` artifacts only when another tool needs a standalone
-  debug or interchange file.
+- Normal `zero check`, `zero run`, `zero test`, `zero build`, `zero size`, and `zero mem` compile packages from `zero.graph` (`zero.toml` takes precedence over `zero.json`). When the `.0` projection was edited, those commands refresh the stale store from source first and note it on stderr; `ZERO_STALE=fail` turns that refresh into an RGP008 error instead.
+- `zero import` refreshes `zero.graph` from edited source explicitly. It accepts the package root, manifest, or any source path inside the package, updates an existing store in place, and preserves node handles where the edit is unambiguous. When several edited nodes could claim one handle, import picks the structurally closest match and notes it on stderr. A whole-file rewrite that keeps the file's function set (names and signatures) is accepted in one pass with regenerated node identities for that file, noted on stderr; only ties that span files or change the function set fail (RGP007) with a split-the-edit strategy. Never delete the store to force a reimport, and omit `--out` for package imports.
+- `zero export [package]` materializes `.0` projections for human review; do not export just to silence stale-projection notes or after every patch. Compiler commands report projection state but never rewrite `.0` files. `zero verify-projection [package]` fails on drift without writing anything.
+- `zero.graph` is binary by default. Reads auto-detect text and binary stores, writes preserve the existing encoding, and `zero status` reports `store format: text|binary`. Use `--format text` only for a deliberately readable debug store. Stdlib `std/*.graph` stores are binary; sibling `std/*.0` files are projections, not the stdlib compile source.
 
-## Repository Store Encoding
-
-`zero.graph` defaults to the binary repository graph store. The compiler loads
-that store through typed graph tables without parsing a text wrapper. Text
-stores remain available only when explicitly requested for debugging or
-inspection:
-
-```sh
-zero init
-zero init app
-zero init --format text app-debug
-zero import --format text
-zero patch --format text --op 'addMain'
-zero validate --format binary --out /tmp/app.graph
-```
-
-Reads auto-detect text and binary `zero.graph` stores and binary graph
-artifacts. Plain package writes preserve an existing text or binary store, and
-`zero status [package]` reports `store format: text|binary`. Prefer the binary
-default for agent-authored packages. Use `--format text` only when the task
-needs a readable repository store artifact. The standard library also uses
-binary `std/*.graph` stores for the compile path, while `std/*.0` files remain
-human-readable projections for review.
-
-## Diffing Graph Stores
-
-Use `zero diff [graph-input]` when a human wants a readable Git diff for
-`.graph` files. It prints the canonical source projection on stdout for Git
-textconv drivers. It does not write `.0` files, and it is not the semantic
-inspection, merge, or repair surface. Agents should still use `zero query`,
-`zero inspect`, and `zero patch` for graph work.
-
-This repository marks graph stores with:
-
-```gitattributes
-*.graph diff=zero-graph
-```
-
-Each clone also needs a Git textconv command. In a Zero checkout:
-
-```sh
-git config diff.zero-graph.textconv 'bin/zero diff'
-```
-
-For an installed compiler outside the Zero repository:
-
-```sh
-git config --global diff.zero-graph.textconv 'zero diff'
-```
-
-`zero.graph` remains the authoring and repository compiler-input store.
-Repository graph build, run, test, size, and mem commands, plus
-standalone `.program-graph` build, run, and size commands, may additionally write
-`.zero/cache/native/mir-*.zmir`, a derived final-MIR cache. The compiler
-memory-maps and verifies that cache before codegen; stale caches are rejected
-by compiler version, graph hash, target, emit kind, and backend request.
-Agents should not patch `.zmir` files. JSON outputs expose this path as a
-`mappedFinalMir` compiler cache entry; `hit: true` means the cache was reused,
-`written: true` means the current command generated it before mapping it, and
-`borrowedStorage: true` means codegen is reading stable strings/readonly data
-from the mapped cache instead of copied source text. For warm repository
-`zero.graph` build/run hits and warm standalone `.program-graph` build/run hits,
-`codegenImmediate: true` and `programReconstructed: false` mean codegen started
-from mapped final MIR without reconstructing checked Program state. Graph-backed
-`zero size` also reports `programReconstructed: false`; it derives helper and
-capability summaries from graph/IR facts instead of checked Program state.
-
-## Graph-First Loop
-
-Create a graph-first package without writing `.0` source:
+## Create
 
 ```sh
 zero init
 zero patch --op 'addMain'
 ```
 
-`zero init` defaults to the current directory. Use `zero init app` only when the
-user asks for a new subdirectory. If the user explicitly asks for starter
-files, keep the creation surface under init with
-`zero init --template cli|lib|package [app]`.
+`zero init` defaults to the current directory and that folder's name. Use `zero init app` for a new subdirectory, `--manifest json` only for explicit compatibility, and `--template cli|lib|package` only when the user asks for starter files.
 
-Build useful program shape through graph operations:
+## Inspect
+
+```sh
+zero query userTotals      # bare name that is not a path = --find in the current package
+zero query --fn main       # one function's signature and call summary
+zero query --fn main --handles   # adds stmt/param patch handles; use before patching
+zero query --calls std     # resolved call targets
+zero query --refs add      # semantic references
+zero query --node '#expr_2cad38f9' --depth 2   # node-scoped: span, parents, children
+zero view --fn main        # one function's canonical source
+zero view --fn main --handles   # the same source with a trailing // #handle per statement
+zero view --fn main --around minLength   # only the enclosing block containing the text
+zero view --outline src/main.0           # signatures plus one-line docs, no bodies
+zero status                # store format and projection state
+```
+
+`--node` defaults to depth 1; add `--full` for the whole-module report. Use handles from `zero view --fn <name> --handles`, `--find`, or `--fn <name> --handles` for checked edits (`set`, `insert`, `insertEdge`, `replace`, `replaceExpr`, `rename`, `delete`); delete compacts ordered graph groups so valid sibling order is preserved. Handles accept short forms: the id segment (`#55ae541c`), any unique prefix (`#55ae`), or `#head..tail` for ids with long shared prefixes; `--handles` views print the shortest form that resolves, and a missing handle fails with the nearest existing one. Reserve unfiltered `zero query` dumps for tools that need every node and edge.
+
+## Patches
+
+Edit through the graph: `zero patch` covers everything from one-line changes (`addCheckWrite`, `rename`, `set`) to whole function bodies (`--replace-fn <fn> --body-file -` with a heredoc). Direct `.0` text edits are a last resort for changes no patch op expresses; the compiler will refresh the graph from edited source, but patch keeps the loop faster (0.2s validation, no reconcile pass) and preserves node identity for queries.
+
+A successful patch loads, applies, validates, and saves `zero.graph`, and prints the saved path, new graph hash, functions, and tests. Do not run `zero check`, `zero view`, `zero query`, or `zero export` just to confirm that the patch applied. Use those only when you need current text/handles, projection review, or a diagnostic loop.
 
 ```sh
 zero patch \
@@ -118,48 +56,83 @@ zero patch \
   --op 'addTest name="addition works" call="add" arg0="40" arg1="2" expect="42" type="i32"'
 ```
 
-For multi-statement functions, use builder operations instead of hand-authoring
-node tables:
+Use `addTest` for one pure helper call; reserve `addTestBody` for custom body rows. Test labels are display names, not `__zero_test_*` function names. If a custom test fails as an unknown function label, delete it and recreate simple coverage with `addTest` instead of renaming the label.
 
-```sh
-zero patch \
-  --op 'addFunction name="add_twice" ret="u32"' \
-  --op 'addParam fn="add_twice" name="x" type="u32"' \
-  --op 'addParam fn="add_twice" name="y" type="u32"' \
-  --op 'addLetBinary fn="add_twice" name="first" type="u32" operator="+" left="x" right="y"' \
-  --op 'addLetBinary fn="add_twice" name="total" type="u32" operator="+" left="first" right="y"' \
-  --op 'addReturnValue fn="add_twice" value="total" type="u32"'
+For declaration-level edits, stay in patch ops instead of rewriting files. `setConst name="limit" value="64"` replaces a top-level const's initializer by package-scoped name. `addParamTo fn="scan" name="bias" type="i32" default="0"` appends a parameter to an existing function and updates every call site in the package (nested calls included) to pass the default explicitly, reporting `updated N call sites`; without `default` it fails with the call-site count. `setReturnType fn="scan" type="i64"` changes a declared return type. All three revalidate and batch like any other op.
+
+For a new or replacement multi-statement helper, use complete source through `upsertFunction` instead of editing `.0` and importing:
+
+```text
+zero-program-graph-patch v1
+upsertFunction handle
+fn handle(request: Span<u8>, response: MutSpan<u8>) -> Maybe<Span<u8>> {
+    return null
+}
+end
 ```
 
-For output from a local value:
+For runnable CLI programs, keep `World` on `pub fn main`; value-based helpers build and run more reliably. HTTP server helpers use `handle(request, response)`.
+
+`upsertFunction` parses exactly one complete function declaration, inserts it if missing, and replaces the prior declaration and body if it already exists. For smaller append-only work, `appendStmt fn="main" stmt="check std.http.listen(world, 3000_u16)"` appends one canonical statement, and `addReturnExpr fn="maybe" expr="null"` appends a return statement for any expression. `addReturnValue` is only for identifier returns.
+
+For sub-line edits, think in graph: take a handle from `zero view --fn <name> --handles` and change exactly one thing. `set` edits one field (a literal `value`, a declared `type`, a `name`/operator); `replaceExpr` swaps any expression subtree, and aimed at a statement handle it replaces that statement's expression (initializer, condition, return value). Repeat `--op` to batch several micro-ops into one patch with a single revalidation:
 
 ```sh
-zero patch \
-  --op 'addLetLiteral fn="main" name="message" type="String" value="hello\n"' \
-  --op 'addCheckWriteValue fn="main" value="message" type="String"'
+zero patch . \
+  --op 'set node="#a647" field="value" expect="1" value="8"' \
+  --op 'replaceExpr node="#5f15" with="i < k + 1"'
 ```
 
-For CLI behavior and other multi-statement workflows, use row syntax in a graph
-patch file. This keeps the write on `zero.graph`; the `.0` file is only the
-human projection you export later. Do not add or depend on program-specific patch
-operations for toy workflows.
+To express one cross-cutting transformation instead of editing N sites, use structural rewrite by example. `--rewrite '<pattern>' --to '<template>'` matches canonical projection expressions structurally; `$A`, `$B` bind arbitrary subtrees and the same metavariable twice must match equal subtrees. The default is a dry run that lists every site as `path fn:handle` with rendered before/after; `--apply` rewrites all sites in one batch with one revalidation, and `--fn <name>` scopes matching to one function. Patterns are expression-level only; unsupported subtree kinds are skipped and counted.
+
+```sh
+zero patch . --rewrite 'bnCmp($A, $B) == 0' --to 'bnEq($A, $B)'          # dry run
+zero patch . --rewrite 'bnCmp($A, $B) == 0' --to 'bnEq($A, $B)' --apply  # rewrite every site
+```
+
+For multi-statement bodies, use `replaceFunctionBody` for a whole function or `replaceBlockBody` for one selected `Block` node. Body rows accept canonical projection syntax, the same text `zero view` prints:
 
 ```text
 zero-program-graph-patch v1
 expect graphHash "graph:a7f7e6899a73f3b4"
 replaceFunctionBody main
-  let name Maybe<String> = std.args.get 1
-  if name.has
-    check world.out.write "hello "
-    check world.out.write name.value
-    check world.out.write "\n"
-  else
-    check world.out.write "hello anonymous\n"
+  let name: Maybe<String> = std.args.get(1)
+  if name.has {
+    check world.out.write("hello ")
+    check world.out.write(name.value)
+    check world.out.write("\n")
+  } else {
+    check world.out.write("hello anonymous\n")
+  }
 end
 ```
 
-To replace only one branch or nested body, query block handles and patch the
-selected `Block` node instead of rewriting the whole function:
+To replace one function body without patch syntax or shell quoting, use `--replace-fn` with `--body-file`. `--body-file -` reads the body rows from stdin, so a heredoc does the whole edit in one call:
+
+```sh
+zero patch --replace-fn main --body-file - <<'EOF'
+  let name: Maybe<String> = std.args.get(1)
+  if name.has {
+    check world.out.write("hello ")
+    check world.out.write(name.value)
+    check world.out.write("\n")
+  } else {
+    check world.out.write("hello anonymous\n")
+  }
+EOF
+```
+
+The body holds only the new rows, exactly what `zero view --fn <name>` prints between the signature braces (no header, no `end`). Quotes, `$variables`, and backslashes pass through a quoted heredoc untouched. The alternative is a file path: `zero patch --replace-fn <name> --body-file /tmp/main.body`.
+
+To change a few characters inside a large function, do not retype the body: `--replace-in-fn` replaces one unique literal occurrence of `--old` in the function's canonical body text with `--new` (Edit semantics), then revalidates exactly like `--replace-fn`:
+
+```sh
+zero patch --replace-in-fn handleLine --old 'limit + 1' --new 'limit + 2'
+```
+
+A missing or non-unique `--old` fails with the occurrence count; extend `--old` with surrounding lines from `zero view --fn <name>` until it matches once. Inline `--old`/`--new` accept `\n` escapes; `--old-file`/`--new-file <file|->` read multi-line text from a file or stdin.
+
+To patch one branch instead of rewriting the whole function, find the block handle first:
 
 ```sh
 zero query --find Block
@@ -167,131 +140,47 @@ zero query --find Block
 
 ```text
 zero-program-graph-patch v1
-expect graphHash "graph:a7f7e6899a73f3b4"
 replaceBlockBody #block_32cefdd9
-  check world.out.write "name: "
-  check world.out.write name.value
-  check world.out.write "\n"
+  check world.out.write("updated\n")
 end
 ```
 
-Preview repository graph patches without writing:
+Preview without writing, and list operation shapes without loading a graph:
 
 ```sh
 zero patch --check-only /tmp/body.patch
 zero patch --dry-run --json /tmp/body.patch
-```
-
-Inspect an existing package through the graph interface:
-
-```sh
-zero query
-zero query --fn main
-zero query --find write
-zero query --calls std
-zero query --refs add
-zero query --node '#expr_2cad38f9'
-zero view
-zero status
-```
-
-Stay on normal graph output for agent inspection. Add `--json` only when an
-automation tool needs stable fields or a debugging session needs exact machine
-facts. Use `zero query --fn <name>` when you know the function you need,
-`zero query --calls <name>` to find resolved call targets,
-`zero query --refs <name>` to find semantic references, and
-`zero query --find <text>` to search names, IDs, types, values, paths, and
-node kinds for patchable handles. Use those handles for checked edits such as
-`set`, `insert`, `insertEdge`, `replace`, `rename`, or `delete`; `zero
-query --node <id>` shows the selected node's parent and child edges without a
-full graph dump. Low-level delete compacts ordered graph groups so valid sibling
-order is preserved. Use full dumps only when a tool needs every node and edge:
-
-```sh
-zero query
-zero query --fn main
-zero query --find parse
-zero query --calls std
-zero query --refs add
-zero query --node '#fn_main'
-zero source-map
-zero inspect
-zero patch --op 'addMain'
-```
-
-Create a derived graph artifact only when you need to carry a graph between
-tools:
-
-```sh
-zero dump --out .zero/agent/app.program-graph
-```
-
-Inspect it with normal readable output:
-
-```sh
-zero view .zero/agent/app.program-graph
-zero check .zero/agent/app.program-graph
-zero roundtrip .zero/agent/app.program-graph
-```
-
-Use source maps when a tool needs to connect graph nodes back to source ranges:
-
-```sh
-zero source-map
-```
-
-When a human has edited source after an agent captured a derived graph, reconcile
-the prior graph with the edited source before relying on old node IDs:
-
-```sh
-zero dump --out .zero/agent/app.before.program-graph [graph-input]
-zero reconcile .zero/agent/app.before.program-graph --source <projection-or-package>
-```
-
-`zero reconcile` reports unchanged, edited, inserted, deleted, ambiguous,
-and identity-changed nodes. Ambiguous identity matches fail instead of silently
-assigning a stale node handle.
-
-## Patches
-
-Graph patches against a package write `zero.graph` after loading the
-store, applying operations, validating graph readiness, and saving the result.
-Plain success output includes the saved path, new graph hash, functions, and
-tests, so agents do not need a follow-up `zero query` just to refresh context:
-
-```sh
-zero patch \
-  --op 'addMain' \
-  --op 'addCheckWrite fn="main" text="hello from graph\n"'
-zero run
-```
-
-List supported patch operation shapes without loading or writing a graph:
-
-```sh
 zero patch --op help
 ```
 
-Supported graph patch operations:
+Supported graph patch operations (authoring ops first; node-handle ops are the advanced surface):
 
 ```text
-expect graphHash "graph:a7f7e6899a73f3b4"
-set node="#id" field="value" expect="old" value="new"
-insert node="#id" kind="Literal" parent="#parent" edge="arg" order="0" type="String" value="text"
-insertEdge from="#from" to="#to" edge="arg" target="node" order="0"
-replace node="#id" expect="nodehash:abc123" kind="Literal" type="String" value="text"
-delete node="#id" expect="nodehash:abc123"
-rename node="#id" expect="old" value="new"
 addMain
 addCheckWrite fn="main" text="hello\n"
 addFunction name="add" ret="i32"
 addParam fn="add" name="left" type="i32"
+addParamTo fn="add" name="bias" type="i32" default="0"
+setConst name="limit" value="64"
+setReturnType fn="add" type="i64"
 addReturnBinary fn="add" name="+" left="left" right="right" type="i32"
 addLetLiteral fn="main" name="count" type="u32" value="0"
 addLetBinary fn="add" name="sum" type="i32" operator="+" left="left" right="right"
 addReturnValue fn="identity" value="input" type="i32"
+addReturnExpr fn="maybe" expr="null"
+appendStmt fn="main" stmt="check std.http.listen(world, 3000_u16)"
 addCheckWriteValue fn="main" value="message" type="String"
 addTest name="addition works" call="add" arg0="40" arg1="2" expect="42" type="i32"
+addTestBody name="api add"
+  expect apiAddOk()
+end
+renameTest name="api add" value="api add route"
+deleteTest name="api add"
+upsertFunction handle
+fn handle(request: Span<u8>, response: MutSpan<u8>) -> Maybe<Span<u8>> {
+    return null
+}
+end
 replaceFunctionBody main
   let name Maybe<String> = std.args.get 1
   if name.has
@@ -304,12 +193,18 @@ end
 replaceBlockBody #block_id
   check world.out.write "updated\n"
 end
+expect graphHash "graph:a7f7e6899a73f3b4"
+set node="#id" field="value" expect="old" value="new"
+insert node="#id" kind="Literal" parent="#parent" edge="arg" order="0" type="String" value="text"
+insertEdge from="#from" to="#to" edge="arg" target="node" order="0"
+replace node="#id" expect="nodehash:abc123" kind="Literal" type="String" value="text"
+replaceExpr node="#id" with="left + 1"
+delete node="#id" expect="nodehash:abc123"
+delete node="#id"
+rename node="#id" expect="old" value="new"
 ```
 
-`insert` and `insertEdge` default `order` to `0` when it is omitted, which is
-usually right for singular edges like `expr`, `left`, and `declaredType`.
-
-For precise existing-node edits, use graph hashes and node facts:
+`insert` and `insertEdge` default `order` to `0`, which fits singular edges like `expr`, `left`, and `declaredType`. For precise existing-node edits, pin the graph hash and node facts:
 
 ```sh
 zero patch \
@@ -317,96 +212,26 @@ zero patch \
   --op 'set node="#expr_653eeb6e" field="value" expect="hello from zero\n" value="hello agent\n"'
 ```
 
-For larger edits, use a patch file:
+For larger edits, write a patch file under `/tmp` or pass `--patch-text`; `--patch-text -` reads a complete `zero-program-graph-patch v1` patch from stdin. Always include `expect graphHash` when a patch is carried across tool calls.
 
-```text
-zero-program-graph-patch v1
-expect graphHash "graph:a7f7e6899a73f3b4"
-set node="#expr_653eeb6e" field="value" expect="hello from zero\n" value="hello agent\n"
-insert node="#patch001" kind="Literal" parent="#expr_c403020c" edge="arg" order="1" type="String" value="again\n"
-rename node="#decl_ad8d9028" expect="main" value="start"
-delete node="#patch001"
-```
+## Artifacts, Reconcile, And Diff
 
-Prefer structured operations over editing graph artifact text by hand. Use
-`--patch-text` or write patch files under `/tmp` when an edit spans many lines.
-If the user requested graph authoring, do not hand-edit `.0` source or create a
-temporary `.0` program as a fallback. Always include `expect graphHash` when you
-are carrying a patch across tool calls.
-
-## Validate And Projections
-
-Do not run `zero check` just to validate a successful patch. Run focused
-compiler commands only when they verify behavior that patch validation cannot,
-such as tests or execution:
+Create a derived artifact only to carry a graph between tools, and validate it before applying accepted changes back to a package store:
 
 ```sh
-zero test
-zero run
+zero dump --out .zero/agent/app.program-graph
+zero validate .zero/agent/app.program-graph
+zero view .zero/agent/app.program-graph
 ```
 
-When human-readable source projections are requested by the user, export
-explicitly:
+Do not commit `.program-graph` files unless the user explicitly asks. `zero source-map` connects graph nodes to source ranges. When a human edited source after a graph was captured, reconcile before relying on old node IDs:
 
 ```sh
-zero export
-zero verify-projection
+zero reconcile .zero/agent/app.before.program-graph --source <projection-or-package>
 ```
 
-When a human edits `.0`, import the reviewed projection into the graph store:
+`zero reconcile` reports unchanged, edited, inserted, deleted, ambiguous, and identity-changed nodes; ambiguous matches fail instead of assigning stale handles.
 
-```sh
-zero status
-zero import
-```
+For readable Git diffs of `.graph` files, mark them with `*.graph diff=zero-graph` in `.gitattributes` and set `git config diff.zero-graph.textconv 'zero diff'` (`bin/zero diff` inside a Zero checkout). `zero diff` prints canonical review text for textconv, and `zero diff --fn <name>` scopes it to one function; keep using `zero query`, `zero inspect`, and `zero patch` for graph work.
 
-`import` updates `zero.graph` from source text, preserves existing
-graph node handles where the source edit is unambiguous, and stores exact
-checked-in `.0` projection bytes for tracked local files. Ambiguous identity
-changes fail instead of guessing. `export` updates stale or missing
-checked-in `.0` projections from `zero.graph`, and `verify-projection` checks the
-store against checked-in source projection bytes without rebuilding a source
-graph.
-
-For package inputs, normal compiler commands validate and compile from the graph
-store, including target and package metadata, so graph packages can still be
-checked, built, run, tested, sized, and inspected when `.0`
-projections are missing. Commands report whether the source projection is
-clean, missing, stale, conflicting, or unavailable, but do not rewrite `.0`
-files. Use `zero verify-projection` when projection drift must fail the
-workflow.
-
-`merge` writes only the target `zero.graph` when independent node-hash edits can
-be combined; it does not rewrite `.0` projections. Run `export` only when a
-human-readable projection needs to be refreshed.
-
-In the Zero repository, `pnpm run repository-graph:check` verifies checked-in
-`zero.graph` stores for CI with the pinned `linux-musl-x64` graph target.
-
-For derived graph artifacts, validate the artifact before applying any accepted
-change to a package graph store or `.graph` sidecar. Export `.0` separately when
-humans need to review the projection:
-
-```sh
-zero validate .zero/agent/app.patched.program-graph
-zero check .zero/agent/app.patched.program-graph
-zero view .zero/agent/app.patched.program-graph
-```
-
-Do not commit `.program-graph` files unless the user explicitly asks for derived
-artifacts.
-
-## Packages
-
-For packages, inspect and patch from the package root or manifest. Commands
-default to the current directory, so omit the input when already inside the
-package. Only write an artifact when another tool needs a file transfer:
-
-```sh
-zero query
-zero view
-zero patch --op 'addMain'
-```
-
-Those commands use the checked-in `zero.graph` store and report source
-projection state without rewriting `.0` files.
+`zero merge --base <base-zero.graph> --left <left-zero.graph> --right <right-zero.graph> <package>` combines independent node-hash edits and writes only the target store; run `export` separately if a human needs the refreshed projection. Build and run commands may also write a derived final-MIR cache under `.zero/cache/native/`; agents should not patch `.zmir` files.
